@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/ioutil"
+	"log"
 	"net/http"
 )
 
@@ -11,12 +12,15 @@ type TFTGO struct {
 	key       string
 	Region    string
 	AltRegion string
+	ShowLogs  bool
+	// TODO: Rate limit
 }
 
-func TftGo(RiotApiKey string, region string) (TFTGO, error) {
+func TftGo(RiotApiKey string, region string, showLogs bool) (TFTGO, error) {
 	t := TFTGO{
-		key:    RiotApiKey,
-		Region: region,
+		key:      RiotApiKey,
+		Region:   region,
+		ShowLogs: showLogs,
 	}
 
 	// Verify region and get AltRegion
@@ -39,13 +43,17 @@ func TftGo(RiotApiKey string, region string) (TFTGO, error) {
 	return t, nil
 }
 
-func (t *TFTGO) Request(url string, isAltRegion bool, target *interface{}) error {
+func (t *TFTGO) Request(url string, isAltRegion bool, target interface{}) error {
 	// proper region mapping
 	u := ""
 	if isAltRegion {
 		u = "https://" + t.AltRegion + ".api.riotgames.com/" + url
 	} else {
 		u = "https://" + t.Region + ".api.riotgames.com/" + url
+	}
+
+	if t.ShowLogs {
+		log.Printf("TFTGO Request - %v\n", u)
 	}
 
 	client := http.Client{}
@@ -81,5 +89,33 @@ func (t *TFTGO) Request(url string, isAltRegion bool, target *interface{}) error
 	return nil
 }
 
-func (t *TFTGO) tftLeagueV1(division string) {
+type TftLeagueEntry struct {
+	SummonerId   string `json:"summonerId"`
+	LeaguePoints int    `json:"leaguePoints"`
+	Rank         string `json:"rank"`
+	Wins         int    `json:"wins"`
+	Losses       int    `json:"losses"`
+	Veteran      bool   `json:"veteran"`
+	Inactive     bool   `json:"inactive"`
+	FreshBlood   bool   `json:"freshBlood"`
+	HotStreak    bool   `json:"hotStreak"`
+}
+
+type TftLeagueResponse struct {
+	Tier     string           `json:"tier"`
+	LeagueId string           `json:"leagueId"`
+	Queue    string           `json:"queue"`
+	Name     string           `json:"name"`
+	Entries  []TftLeagueEntry `json:"entries"`
+}
+
+func (t *TFTGO) tftLeagueV1Challenger() (TftLeagueResponse, error) {
+	url := "tft/league/v1/challenger?queue=RANKED_TFT"
+	challenger := TftLeagueResponse{}
+	err := t.Request(url, false, &challenger)
+	if err != nil {
+		return challenger, err
+	}
+
+	return challenger, nil
 }
