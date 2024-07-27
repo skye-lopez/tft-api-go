@@ -6,21 +6,25 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"time"
 )
 
 type TFTGO struct {
-	key       string
-	Region    string
-	AltRegion string
-	ShowLogs  bool
-	// TODO: Rate limit
+	key        string
+	Region     string
+	AltRegion  string
+	ShowLogs   bool
+	RateLimit  bool
+	RetryCount int
 }
 
-func TftGo(RiotApiKey string, region string, showLogs bool) (TFTGO, error) {
+func TftGo(RiotApiKey string, region string, showLogs bool, rateLimit bool, retryCount int) (TFTGO, error) {
 	t := TFTGO{
-		key:      RiotApiKey,
-		Region:   region,
-		ShowLogs: showLogs,
+		key:        RiotApiKey,
+		Region:     region,
+		ShowLogs:   showLogs,
+		RateLimit:  rateLimit,
+		RetryCount: retryCount,
 	}
 
 	// Verify region and get AltRegion
@@ -35,7 +39,7 @@ func TftGo(RiotApiKey string, region string, showLogs bool) (TFTGO, error) {
 
 	// Validate API key
 	var result interface{}
-	err := t.Request("tft/status/v1/platform-data", false, &result)
+	err := t.Request("tft/status/v1/platform-data", false, &result, t.RetryCount)
 	if err != nil {
 		return t, errors.New("TftGo - Invalid API key")
 	}
@@ -43,7 +47,8 @@ func TftGo(RiotApiKey string, region string, showLogs bool) (TFTGO, error) {
 	return t, nil
 }
 
-func (t *TFTGO) Request(url string, isAltRegion bool, target interface{}) error {
+// TODO: Rate limit (eventually ~ the api already gates this)
+func (t *TFTGO) Request(url string, isAltRegion bool, target interface{}, retryCount int) error {
 	// proper region mapping
 	u := ""
 	if isAltRegion {
@@ -66,9 +71,13 @@ func (t *TFTGO) Request(url string, isAltRegion bool, target interface{}) error 
 		"X-Riot-Token": {t.key},
 	}
 
+	// Only retry on the DO
 	res, err := client.Do(req)
-	if err != nil {
+	if err != nil && retryCount == 0 {
 		return err
+	} else if err != nil && retryCount > 0 {
+		time.Sleep(1 * time.Second) // NOTE: This is hard coded to 1, but may want to make it variable
+		return t.Request(url, isAltRegion, target, (retryCount - 1))
 	}
 	defer res.Body.Close()
 
@@ -112,7 +121,7 @@ type TftLeagueResponse struct {
 func (t *TFTGO) TftLeagueV1Challenger() (TftLeagueResponse, error) {
 	url := "tft/league/v1/challenger?queue=RANKED_TFT"
 	challenger := TftLeagueResponse{}
-	err := t.Request(url, false, &challenger)
+	err := t.Request(url, false, &challenger, t.RetryCount)
 	if err != nil {
 		return challenger, err
 	}
@@ -123,7 +132,7 @@ func (t *TFTGO) TftLeagueV1Challenger() (TftLeagueResponse, error) {
 func (t *TFTGO) TftLeagueV1Grandmaster() (TftLeagueResponse, error) {
 	url := "tft/league/v1/grandmaster?queue=RANKED_TFT"
 	grandmaster := TftLeagueResponse{}
-	err := t.Request(url, false, &grandmaster)
+	err := t.Request(url, false, &grandmaster, t.RetryCount)
 	if err != nil {
 		return grandmaster, err
 	}
@@ -134,7 +143,7 @@ func (t *TFTGO) TftLeagueV1Grandmaster() (TftLeagueResponse, error) {
 func (t *TFTGO) TftLeagueV1Master() (TftLeagueResponse, error) {
 	url := "tft/league/v1/master?queue=RANKED_TFT"
 	master := TftLeagueResponse{}
-	err := t.Request(url, false, &master)
+	err := t.Request(url, false, &master, t.RetryCount)
 	if err != nil {
 		return master, err
 	}
