@@ -8,17 +8,28 @@ import (
 )
 
 type TFTGO struct {
-	key string
+	key       string
+	Region    string
+	AltRegion string
 }
 
-// TftGo - Struct builder
-func TftGo(RiotApiKey string) (TFTGO, error) {
-	// Validate API key
-
+func TftGo(RiotApiKey string, region string) (TFTGO, error) {
 	t := TFTGO{
-		key: RiotApiKey,
+		key:    RiotApiKey,
+		Region: region,
 	}
 
+	// Verify region and get AltRegion
+	regionMap := make(map[string]string)
+	regionMap["na1"] = "americas"
+
+	val, ok := regionMap[region]
+	if !ok {
+		return t, errors.New("TftGo - Invalid region provided")
+	}
+	t.AltRegion = val
+
+	// Validate API key
 	var result interface{}
 	err := t.Request("https://na1.api.riotgames.com/tft/status/v1/platform-data", &result)
 	if err != nil {
@@ -28,8 +39,6 @@ func TftGo(RiotApiKey string) (TFTGO, error) {
 	return t, nil
 }
 
-// @{Request}
-// Basic request function only preforms GET requests.
 func (t *TFTGO) Request(url string, target *interface{}) error {
 	client := http.Client{}
 	req, err := http.NewRequest("GET", url, nil)
@@ -62,4 +71,7 @@ func (t *TFTGO) Request(url string, target *interface{}) error {
 	}
 
 	return nil
+}
+
+func (t *TFTGO) tftLeagueV1(division string) {
 }
