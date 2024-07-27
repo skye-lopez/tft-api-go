@@ -31,7 +31,7 @@ func TftGo(RiotApiKey string, region string) (TFTGO, error) {
 
 	// Validate API key
 	var result interface{}
-	err := t.Request("https://na1.api.riotgames.com/tft/status/v1/platform-data", &result)
+	err := t.Request("tft/status/v1/platform-data", false, &result)
 	if err != nil {
 		return t, errors.New("TftGo - Invalid API key")
 	}
@@ -39,9 +39,17 @@ func TftGo(RiotApiKey string, region string) (TFTGO, error) {
 	return t, nil
 }
 
-func (t *TFTGO) Request(url string, target *interface{}) error {
+func (t *TFTGO) Request(url string, isAltRegion bool, target *interface{}) error {
+	// proper region mapping
+	u := ""
+	if isAltRegion {
+		u = "https://" + t.AltRegion + ".api.riotgames.com/" + url
+	} else {
+		u = "https://" + t.Region + ".api.riotgames.com/" + url
+	}
+
 	client := http.Client{}
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", u, nil)
 	if err != nil {
 		return err
 	}
