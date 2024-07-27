@@ -109,7 +109,7 @@ type TftLeagueResponse struct {
 	Entries  []TftLeagueEntry `json:"entries"`
 }
 
-func (t *TFTGO) tftLeagueV1Challenger() (TftLeagueResponse, error) {
+func (t *TFTGO) TftLeagueV1Challenger() (TftLeagueResponse, error) {
 	url := "tft/league/v1/challenger?queue=RANKED_TFT"
 	challenger := TftLeagueResponse{}
 	err := t.Request(url, false, &challenger)
@@ -118,4 +118,26 @@ func (t *TFTGO) tftLeagueV1Challenger() (TftLeagueResponse, error) {
 	}
 
 	return challenger, nil
+}
+
+func (t *TFTGO) TftLeagueV1Grandmaster() (TftLeagueResponse, error) {
+	url := "tft/league/v1/grandmaster?queue=RANKED_TFT"
+	grandmaster := TftLeagueResponse{}
+	err := t.Request(url, false, &grandmaster)
+	if err != nil {
+		return grandmaster, err
+	}
+
+	return grandmaster, nil
+}
+
+func (t *TFTGO) TftLeagueV1Master() (TftLeagueResponse, error) {
+	url := "tft/league/v1/master?queue=RANKED_TFT"
+	master := TftLeagueResponse{}
+	err := t.Request(url, false, &master)
+	if err != nil {
+		return master, err
+	}
+
+	return master, nil
 }
