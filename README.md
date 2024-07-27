@@ -1,2 +1,2 @@
-# tft-api-go
+# tftgo
 RIOT TFT API IN GOLANG
