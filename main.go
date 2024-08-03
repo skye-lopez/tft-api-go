@@ -31,6 +31,9 @@ func TftGo(RiotApiKey string, region string, showLogs bool, rateLimit bool, retr
 	regionMap := make(map[string]string)
 	regionMap["na1"] = "americas"
 
+    // NOTE: The altRegion is really just what cluster is being called.
+    // and should likely just be americas always. This is the setup for testing
+    // but should likely be an entirely different argument instead.
 	val, ok := regionMap[region]
 	if !ok {
 		return t, errors.New("TftGo - Invalid region provided")
@@ -76,7 +79,8 @@ func (t *TFTGO) Request(url string, isAltRegion bool, target interface{}, retryC
 	if err != nil && retryCount == 0 {
 		return err
 	} else if err != nil && retryCount > 0 {
-		time.Sleep(1 * time.Second) // NOTE: This is hard coded to 1, but may want to make it variable
+        // NOTE: This is hard coded to 1, but may want to make it variable
+		time.Sleep(1 * time.Second) 
 		return t.Request(url, isAltRegion, target, (retryCount - 1))
 	}
 	defer res.Body.Close()
@@ -149,4 +153,35 @@ func (t *TFTGO) TftLeagueV1Master() (TftLeagueResponse, error) {
 	}
 
 	return master, nil
+}
+
+type TftSummonerResponse struct {
+    Id            string `json:"id"`
+    AccountId     string `json:"accountId"`
+    Puuid         string `json:"puuid"`
+    ProfileIconId int `json:"profileIconId"`
+    RevisionDate  int `json:"revisionDate"`
+    SummonerLevel int `json:"summonerLevel"`
+}
+
+func (t *TFTGO) TftSummonerV1SummonerId(summonerId string) (TftSummonerResponse, error) {
+    url := "tft/summoner/v1/summoners/" + summonerId
+    summoner := TftSummonerResponse{}
+    err := t.Request(url, false, &summoner, t.RetryCount)
+    if err != nil {
+        return summoner, err
+    }
+
+    return summoner, err
+}
+
+func (t *TFTGO) TftMatchV1MatchesByPuuid(puuid string) ([]string, error) {
+    url := "tft/match/v1/matches/by-puuid/" + puuid + "/ids?start=0&count=200"
+    ids := make([]string)
+    err := t.Request(url, true, &ids, t.RetryCount)
+    if err != nil {
+        return ids, err
+    }
+
+    return ids, nil
 }
