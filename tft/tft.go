@@ -1,4 +1,4 @@
-package tftgo
+package tft
 
 import (
 	"encoding/json"
