@@ -185,3 +185,62 @@ func (t *TFTGO) TftMatchV1MatchesByPuuid(puuid string) ([]string, error) {
 
 	return ids, nil
 }
+
+// NOTE: This is not parsing all the data, and I may be able to cut some more out
+type TftMatchMetaData struct {
+	DataVersion  string   `json:"data_version"`
+	MatchId      string   `json:"match_id"`
+	Participants []string `json:"participants"`
+}
+
+type TftMatchParticipantTrait struct {
+	Name        string `json:"name"`
+	NumUnits    int    `json:"num_units"`
+	Style       int    `json:"style"`
+	TierCurrent int    `json:"tier_current"`
+	TierTotal   int    `json:"tier_total"`
+}
+
+type TftMatchParticipantUnit struct {
+	CharacterId string   `json:"character_id"`
+	ItemNames   []string `json:"itemNames"`
+	Tier        int      `json:"tier"`
+}
+
+type TftMatchParticipant struct {
+	Augments             []string                   `json:"augments"`
+	GoldLeft             int                        `json:"gold_left"`
+	LastRound            int                        `json:"last_round"`
+	Level                int                        `json:"level"`
+	Placement            int                        `json:"placement"`
+	TotalDamageToPlayers int                        `json:"total_damage_to_players"`
+	Traits               []TftMatchParticipantTrait `json:"traits"`
+	Units                []TftMatchParticipantUnit  `json:"units"`
+}
+
+type TftMatchDataInfo struct {
+	QueueId          int                   `json:"queueId"`
+	QueueIdAlternate int                   `json:"queue_id"`
+	TftGameType      string                `json:"tft_game_type"`
+	TftSetCoreName   string                `json:"tft_set_core_name"`
+	TftSetNumber     int                   `json:"tft_set_number"`
+	EndOfGameResult  string                `json:"endOfGameResult"`
+	GameCreation     int                   `json:"gameCreation"`
+	Participants     []TftMatchParticipant `json:"participants"`
+}
+
+type TftMatchResponse struct {
+	Metadata TftMatchMetaData `json:"metadata"`
+	Info     TftMatchDataInfo `json:"info"`
+}
+
+func (t *TFTGO) TftMatchV1MatchesById(matchId string) (TftMatchResponse, error) {
+	url := "tft/match/v1/matches/" + matchId
+	matchData := TftMatchResponse{}
+	err := t.Request(url, true, &matchData, t.RetryCount)
+	if err != nil {
+		return matchData, err
+	}
+
+	return matchData, err
+}
