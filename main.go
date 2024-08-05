@@ -3,7 +3,7 @@ package tftgo
 import (
 	"encoding/json"
 	"errors"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -89,7 +89,7 @@ func (t *TFTGO) Request(url string, isAltRegion bool, target interface{}, retryC
 		return errors.New("Status Code 403: Foribidden. This likely means the key given is either invalid or does not have access to the selected endpoint.")
 	}
 
-	body, err := ioutil.ReadAll(res.Body)
+	body, err := io.ReadAll(res.Body)
 	if err != nil {
 		return err
 	}
@@ -208,25 +208,25 @@ type TftMatchParticipantUnit struct {
 }
 
 type TftMatchParticipant struct {
+	Traits               []TftMatchParticipantTrait `json:"traits"`
+	Units                []TftMatchParticipantUnit  `json:"units"`
 	Augments             []string                   `json:"augments"`
 	GoldLeft             int                        `json:"gold_left"`
 	LastRound            int                        `json:"last_round"`
 	Level                int                        `json:"level"`
 	Placement            int                        `json:"placement"`
 	TotalDamageToPlayers int                        `json:"total_damage_to_players"`
-	Traits               []TftMatchParticipantTrait `json:"traits"`
-	Units                []TftMatchParticipantUnit  `json:"units"`
 }
 
 type TftMatchDataInfo struct {
-	QueueId          int                   `json:"queueId"`
-	QueueIdAlternate int                   `json:"queue_id"`
+	Participants     []TftMatchParticipant `json:"participants"`
 	TftGameType      string                `json:"tft_game_type"`
 	TftSetCoreName   string                `json:"tft_set_core_name"`
-	TftSetNumber     int                   `json:"tft_set_number"`
 	EndOfGameResult  string                `json:"endOfGameResult"`
+	QueueId          int                   `json:"queueId"`
+	QueueIdAlternate int                   `json:"queue_id"`
+	TftSetNumber     int                   `json:"tft_set_number"`
 	GameCreation     int                   `json:"gameCreation"`
-	Participants     []TftMatchParticipant `json:"participants"`
 }
 
 type TftMatchResponse struct {
