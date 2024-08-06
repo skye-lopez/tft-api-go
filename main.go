@@ -1,13 +1,123 @@
-package tft
+package main
 
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"strings"
+	"sync"
+	"tftgo/pg"
 	"time"
+
+	"github.com/joho/godotenv"
 )
+
+func main() {
+	gq, err := pg.Connect()
+	if err != nil {
+		panic(err)
+	}
+	gq.AddQueriesToMap("queries")
+
+	err := godotenv.Load(".env")
+	if err != nil {
+		panic(err)
+	}
+
+	riotKey := os.Getenv("RIOT_KEY")
+
+	tft, err := TftGo(riotKey, "na1", false, false, 5)
+	if err != nil {
+		panic(err)
+	}
+
+	// Step 1 - Collect all entries from top tiers
+	entries := make([]TftLeagueEntry, 0)
+
+	challengerEntries, _ := tft.TftLeagueV1Challenger()
+	entries = append(entries, challengerEntries.Entries...)
+
+	grandmasterEntries, _ := tft.TftLeagueV1Grandmaster()
+	entries = append(entries, grandmasterEntries.Entries...)
+
+	masterEntries, _ := tft.TftLeagueV1Master()
+	entries = append(entries, masterEntries.Entries...)
+
+	// Step 2 - Collect all summoners from entries
+	summonersChan := make(chan TftSummonerResponse)
+	var summonersWg sync.WaitGroup
+	summonersWg.Add(len(entries))
+	for _, entry := range entries {
+		go func(entry TftLeagueEntry) {
+			defer summonersWg.Done()
+
+			summonerData, _ := tft.TftSummonerV1SummonerId(entry.SummonerId)
+			summonersChan <- summonerData
+		}(entry)
+	}
+
+	go func() {
+		summonersWg.Wait()
+		close(summonersChan)
+	}()
+
+	var summoners []TftSummonerResponse
+	for s := range summonersChan {
+		summoners = append(summoners, s)
+	}
+
+	// Step 3 - Collect all match ids and filter down to unique ones.
+	matchIdsChan := make(chan string)
+	var matchIdsWg sync.WaitGroup
+	for _, summoner := range summoners {
+		matchIdsWg.Add(1)
+		go func(summoner TftSummonerResponse) {
+			defer matchIdsWg.Done()
+
+			matchIds, _ := tft.TftMatchV1MatchesByPuuid(summoner.Puuid)
+			for _, id := range matchIds {
+				matchIdsChan <- id
+			}
+		}(summoner)
+	}
+
+	go func() {
+		matchIdsWg.Wait()
+		close(matchIdsChan)
+	}()
+
+	uniqueMatchIds := mapset.NewSet[string]()
+	for mi := range matchIdsChan {
+		uniqueMatchIds.Add(mi)
+	}
+	// NOTE: We may be able to just use uniqueMatchIds.Iter() instead of cloning.
+	matchIds := uniqueMatchIds.ToSlice()
+	var matchesWg sync.WaitGroup
+
+	// Step 4 - Ingest match data
+	for _, matchId := range matchIds {
+		matchesWg.Add(1)
+		go func(matchId string) {
+			defer matchesWg.Done()
+
+			matchData, _ := tft.TftMatchV1MatchesById(matchId)
+			// Step 1 - make sure we mark this matchId as being processed in DB
+			gq.Query("queries/upsert_match", matchId)
+
+			// Get the current set and game version for making keys
+			set := matchData.Info.TftSetNumber
+			rawPatch := matchData.Info.GameVersion
+		}(matchId)
+	}
+
+	go func() {
+		matchesWg.Wait()
+	}()
+}
 
 type TFTGO struct {
 	key        string
@@ -50,7 +160,6 @@ func TftGo(RiotApiKey string, region string, showLogs bool, rateLimit bool, retr
 	return t, nil
 }
 
-// TODO: Rate limit (eventually ~ the api already gates this)
 func (t *TFTGO) Request(url string, isAltRegion bool, target interface{}, retryCount int) error {
 	// proper region mapping
 	u := ""
@@ -72,6 +181,11 @@ func (t *TFTGO) Request(url string, isAltRegion bool, target interface{}, retryC
 
 	req.Header = http.Header{
 		"X-Riot-Token": {t.key},
+	}
+
+	// TODO: Do something smarter here
+	if t.RateLimit {
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	// Only retry on the DO
@@ -227,6 +341,7 @@ type TftMatchDataInfo struct {
 	QueueIdAlternate int                   `json:"queue_id"`
 	TftSetNumber     int                   `json:"tft_set_number"`
 	GameCreation     int                   `json:"gameCreation"`
+	GameVersion      string                `json:"game_version"`
 }
 
 type TftMatchResponse struct {
@@ -243,4 +358,15 @@ func (t *TFTGO) TftMatchV1MatchesById(matchId string) (TftMatchResponse, error) 
 	}
 
 	return matchData, err
+}
+
+func (t *TFTGO) parsePatchNumber(gameVersion string) string {
+	// "Linux Version 14.15.604.8769 (Jul 26 2024/14:34:42) [PUBLIC] "
+	gameVersion = strings.TrimSpace(gameVersion)
+	splitGameVersion := strings.Split(gameVersion, "Linux Version ")
+	splitPatchVersion := strings.Split(splitGameVersion[1], "(")
+	// TODO: For B patches we may need like 14.15.604 instead of 14.15...
+	patchVersions := strings.Split(splitPatchVersion[0], ".")
+	patch := fmt.Sprintf("%s.%s", patchVersions[0], patchVersions[1])
+	return patch
 }

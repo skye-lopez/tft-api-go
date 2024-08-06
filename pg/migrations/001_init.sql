@@ -3,29 +3,14 @@ create table teams (
     set text not null,
     patch text not null,
     unit_ids text[] not null,
-    place_8 integer not null default 0,
-    place_7 integer not null default 0,
-    place_6 integer not null default 0,
-    place_5 integer not null default 0,
-    place_4 integer not null default 0,
-    place_3 integer not null default 0,
-    place_2 integer not null default 0,
-    place_1 integer not null default 0
+    places integer[] not null default '{0,0,0,0,0,0,0,0}'::integer[]
 );
 
 -- unit.id = CharacterId + ~ + Set + ~ Patch
 create table units (
     id text primary key,
     name text not null,
-    avg integer not null default 0,
-    place_8 integer not null default 0,
-    place_7 integer not null default 0,
-    place_6 integer not null default 0,
-    place_5 integer not null default 0,
-    place_4 integer not null default 0,
-    place_3 integer not null default 0,
-    place_2 integer not null default 0,
-    place_1 integer not null default 0
+    places integer[] not null default '{0,0,0,0,0,0,0,0}'::integer[]
 );
 
 -- units_items.id = units.id + ~ + item1 ~ + item2 + ~ item3
@@ -33,14 +18,7 @@ create table unit_item (
     id text primary key,
     units_id text references units(id),
     avg integer not null default 0,
-    place_8 integer not null default 0,
-    place_7 integer not null default 0,
-    place_6 integer not null default 0,
-    place_5 integer not null default 0,
-    place_4 integer not null default 0,
-    place_3 integer not null default 0,
-    place_2 integer not null default 0,
-    place_1 integer not null default 0
+    places integer[] not null default '{0,0,0,0,0,0,0,0}'::integer[]
 );
 
 create table units_items (
@@ -53,13 +31,9 @@ create table units_items (
 create table augments (
     id text primary key,
     name text not null,
-    avg integer not null default 0,
-    place_8 integer not null default 0,
-    place_7 integer not null default 0,
-    place_6 integer not null default 0,
-    place_5 integer not null default 0,
-    place_4 integer not null default 0,
-    place_3 integer not null default 0,
-    place_2 integer not null default 0,
-    place_1 integer not null default 0
+    places integer[] not null default '{0,0,0,0,0,0,0,0}'::integer[]
+);
+
+create table matches (
+    id text primary key
 );

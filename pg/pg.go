@@ -7,9 +7,10 @@ import (
 
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	goquery "github.com/skye-lopez/go-query"
 )
 
-func Connect() *sql.DB {
+func Connect() (goquery.GoQuery, error) {
 	godotenv.Load("../.env")
 	connString := fmt.Sprintf("user=%s password=%s dbname=%s port=%s sslmode=disable",
 		os.Getenv("PG_USER"),
@@ -18,8 +19,6 @@ func Connect() *sql.DB {
 		os.Getenv("PG_PORT"))
 
 	conn, err := sql.Open("postgres", connString)
-	if err != nil {
-		panic(err)
-	}
-	return conn
+	gq := goquery.NewGoQuery(conn)
+	return gq, err
 }
