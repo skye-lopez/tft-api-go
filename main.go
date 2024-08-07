@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,34 +9,39 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
-	"sync"
-	"tftgo/pg"
 	"time"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/joho/godotenv"
+	"github.com/lib/pq"
+	_ "github.com/lib/pq"
+	goquery "github.com/skye-lopez/go-query"
 )
 
-func main() {
-	gq, err := pg.Connect()
-	if err != nil {
-		panic(err)
+// TODO: Better errors.
+func handleError(e error, context string) {
+	if e != nil {
+		fmt.Println(context)
+		panic(e)
 	}
+}
+
+func main() {
+	// setup ----------------------------------------------------------------
+	err := godotenv.Load(".env")
+	handleError(err, "Error loading .env file.")
+
+	gq, err := Connect()
+	handleError(err, "Error connecting to DB")
 	gq.AddQueriesToMap("queries")
 
-	err := godotenv.Load(".env")
-	if err != nil {
-		panic(err)
-	}
-
 	riotKey := os.Getenv("RIOT_KEY")
+	tft, err := TftGo(riotKey, "na1", false, true, 5)
+	handleError(err, "TftGo error")
 
-	tft, err := TftGo(riotKey, "na1", false, false, 5)
-	if err != nil {
-		panic(err)
-	}
-
-	// Step 1 - Collect all entries from top tiers
+	// get entries ----------------------------------------------------------
 	entries := make([]TftLeagueEntry, 0)
 
 	challengerEntries, _ := tft.TftLeagueV1Challenger()
@@ -47,76 +53,94 @@ func main() {
 	masterEntries, _ := tft.TftLeagueV1Master()
 	entries = append(entries, masterEntries.Entries...)
 
-	// Step 2 - Collect all summoners from entries
-	summonersChan := make(chan TftSummonerResponse)
-	var summonersWg sync.WaitGroup
-	summonersWg.Add(len(entries))
+	// get summoners from entries --------------------------------------------
+	summoners := make([]TftSummonerResponse, 0)
 	for _, entry := range entries {
-		go func(entry TftLeagueEntry) {
-			defer summonersWg.Done()
-
-			summonerData, _ := tft.TftSummonerV1SummonerId(entry.SummonerId)
-			summonersChan <- summonerData
-		}(entry)
+		summonerData, _ := tft.TftSummonerV1SummonerId(entry.SummonerId)
+		summoners = append(summoners, summonerData)
 	}
 
-	go func() {
-		summonersWg.Wait()
-		close(summonersChan)
-	}()
-
-	var summoners []TftSummonerResponse
-	for s := range summonersChan {
-		summoners = append(summoners, s)
-	}
-
-	// Step 3 - Collect all match ids and filter down to unique ones.
-	matchIdsChan := make(chan string)
-	var matchIdsWg sync.WaitGroup
-	for _, summoner := range summoners {
-		matchIdsWg.Add(1)
-		go func(summoner TftSummonerResponse) {
-			defer matchIdsWg.Done()
-
-			matchIds, _ := tft.TftMatchV1MatchesByPuuid(summoner.Puuid)
-			for _, id := range matchIds {
-				matchIdsChan <- id
-			}
-		}(summoner)
-	}
-
-	go func() {
-		matchIdsWg.Wait()
-		close(matchIdsChan)
-	}()
-
+	// get recent match ids from summoners -----------------------------------
 	uniqueMatchIds := mapset.NewSet[string]()
-	for mi := range matchIdsChan {
-		uniqueMatchIds.Add(mi)
+	for _, summoner := range summoners {
+		matchIds, _ := tft.TftMatchV1MatchesByPuuid(summoner.Puuid)
+		for _, id := range matchIds {
+			uniqueMatchIds.Add(id)
+		}
 	}
-	// NOTE: We may be able to just use uniqueMatchIds.Iter() instead of cloning.
 	matchIds := uniqueMatchIds.ToSlice()
-	var matchesWg sync.WaitGroup
+	fmt.Println("Processing matches: ", len(matchIds))
 
-	// Step 4 - Ingest match data
+	// Process each match ----------------------------------------------------
 	for _, matchId := range matchIds {
-		matchesWg.Add(1)
-		go func(matchId string) {
-			defer matchesWg.Done()
+		rows, err := gq.Query("queries/get_match", matchId)
+		handleError(err, "queries/get_match err:")
+		if rows[0].([]interface{})[0] != "none" {
+			fmt.Println("Skipping match")
+			return
+		}
 
-			matchData, _ := tft.TftMatchV1MatchesById(matchId)
-			// Step 1 - make sure we mark this matchId as being processed in DB
-			gq.Query("queries/upsert_match", matchId)
+		matchData, _ := tft.TftMatchV1MatchesById(matchId)
+		gq.Query("queries/upsert_match", matchId)
 
-			// Get the current set and game version for making keys
-			set := matchData.Info.TftSetNumber
-			rawPatch := matchData.Info.GameVersion
-		}(matchId)
+		set := matchData.Info.TftSetNumber
+		patch := tft.parsePatchNumber(matchData.Info.GameVersion)
+
+		for _, p := range matchData.Info.Participants {
+			unitKeys := make([]string, 0)
+			unitNames := make([]string, 0)
+
+			// Units
+			for _, u := range p.Units {
+				unitKey := fmt.Sprintf("%s~%d~%s", u.CharacterId, set, patch)
+				unitKeys = append(unitKeys, unitKey)
+				unitNames = append(unitNames, u.CharacterId)
+				gq.Query("queries/upsert_unit", unitKey, u.CharacterId, p.Placement)
+
+				// For now we only want to track units that completed the match
+				// with 3 items
+				if len(u.ItemNames) == 3 {
+					itemId := fmt.Sprintf("%s~%s~%s~%s", unitKey, u.ItemNames[0], u.ItemNames[1], u.ItemNames[2])
+					gq.Query("queries/upsert_unit_item", itemId, unitKey, p.Placement)
+				}
+			}
+
+			// augments
+			for _, a := range p.Augments {
+				augmentKey := fmt.Sprintf("%s~%d~%s", a, set, patch)
+				gq.Query("queries/upsert_augment", augmentKey, a, p.Placement)
+			}
+
+			// teams
+			slices.Sort(unitNames)
+			slices.Sort(unitKeys)
+
+			formattedUnits := strings.Join(unitNames[:], "~")
+			teamKey := fmt.Sprintf("%s~%d~%s", formattedUnits, set, patch)
+			gq.Query("queries/upsert_team", teamKey, set, patch, pq.Array(unitKeys), p.Placement)
+		}
 	}
+}
 
-	go func() {
-		matchesWg.Wait()
-	}()
+func Connect() (goquery.GoQuery, error) {
+	connString := fmt.Sprintf("user=%s password=%s dbname=%s port=%s sslmode=disable",
+		os.Getenv("PG_USER"),
+		os.Getenv("PG_PWD"),
+		os.Getenv("PG_DBNAME"),
+		os.Getenv("PG_PORT"))
+	fmt.Println(connString)
+
+	conn, err := sql.Open("postgres", connString)
+	if err != nil {
+		panic(err)
+	}
+	gq := goquery.NewGoQuery(conn)
+
+	_, err = gq.Conn.Exec("SELECT 1 as test")
+	if err != nil {
+		panic(err)
+	}
+	return gq, err
 }
 
 type TFTGO struct {
@@ -185,7 +209,7 @@ func (t *TFTGO) Request(url string, isAltRegion bool, target interface{}, retryC
 
 	// TODO: Do something smarter here
 	if t.RateLimit {
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(25 * time.Millisecond)
 	}
 
 	// Only retry on the DO
@@ -361,12 +385,9 @@ func (t *TFTGO) TftMatchV1MatchesById(matchId string) (TftMatchResponse, error) 
 }
 
 func (t *TFTGO) parsePatchNumber(gameVersion string) string {
-	// "Linux Version 14.15.604.8769 (Jul 26 2024/14:34:42) [PUBLIC] "
 	gameVersion = strings.TrimSpace(gameVersion)
-	splitGameVersion := strings.Split(gameVersion, "Linux Version ")
-	splitPatchVersion := strings.Split(splitGameVersion[1], "(")
-	// TODO: For B patches we may need like 14.15.604 instead of 14.15...
-	patchVersions := strings.Split(splitPatchVersion[0], ".")
-	patch := fmt.Sprintf("%s.%s", patchVersions[0], patchVersions[1])
-	return patch
+	splitGameVersion := strings.Split(gameVersion, "<Releases/")
+	gameVersion = splitGameVersion[len(splitGameVersion)-1]
+	gameVersion = strings.Trim(gameVersion, ">")
+	return gameVersion
 }
