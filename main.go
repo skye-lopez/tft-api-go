@@ -11,6 +11,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -29,7 +30,8 @@ func handleError(e error, context string) {
 }
 
 func main() {
-	// setup ----------------------------------------------------------------
+	var wg sync.WaitGroup
+
 	err := godotenv.Load(".env")
 	handleError(err, "Error loading .env file.")
 
@@ -37,35 +39,61 @@ func main() {
 	handleError(err, "Error connecting to DB")
 	gq.AddQueriesToMap("queries")
 
+	wg.Add(1)
+	go AnalyzeRegion("na1", &gq, &wg)
+
+	wg.Add(1)
+	go AnalyzeRegion("jp1", &gq, &wg)
+
+	wg.Add(1)
+	go AnalyzeRegion("kr", &gq, &wg)
+
+	wg.Wait()
+}
+
+func AnalyzeRegion(region string, gq *goquery.GoQuery, wg *sync.WaitGroup) {
+	defer wg.Done()
 	riotKey := os.Getenv("RIOT_KEY")
-	tft, err := TftGo(riotKey, "na1", false, true, 5)
+
+	tft, err := TftGo(riotKey, region, true, true, 5)
 	handleError(err, "TftGo error")
 
 	// get entries ----------------------------------------------------------
 	entries := make([]TftLeagueEntry, 0)
 
-	challengerEntries, _ := tft.TftLeagueV1Challenger()
+	challengerEntries, _, _ := tft.TftLeagueV1Challenger()
 	entries = append(entries, challengerEntries.Entries...)
 
-	grandmasterEntries, _ := tft.TftLeagueV1Grandmaster()
+	grandmasterEntries, _, _ := tft.TftLeagueV1Grandmaster()
 	entries = append(entries, grandmasterEntries.Entries...)
 
-	masterEntries, _ := tft.TftLeagueV1Master()
+	masterEntries, _, _ := tft.TftLeagueV1Master()
 	entries = append(entries, masterEntries.Entries...)
 
 	// get summoners from entries --------------------------------------------
 	summoners := make([]TftSummonerResponse, 0)
 	for _, entry := range entries {
-		summonerData, _ := tft.TftSummonerV1SummonerId(entry.SummonerId)
-		summoners = append(summoners, summonerData)
+		summonerData, _, statusCode := tft.TftSummonerV1SummonerId(entry.SummonerId)
+		if statusCode == 200 {
+			summoners = append(summoners, summonerData)
+		} else {
+			fmt.Println(entry)
+		}
 	}
 
 	// get recent match ids from summoners -----------------------------------
 	uniqueMatchIds := mapset.NewSet[string]()
 	for _, summoner := range summoners {
-		matchIds, _ := tft.TftMatchV1MatchesByPuuid(summoner.Puuid)
-		for _, id := range matchIds {
-			uniqueMatchIds.Add(id)
+		if len(summoner.Puuid) < 2 {
+			continue
+		}
+		matchIds, _, statusCode := tft.TftMatchV1MatchesByPuuid(summoner.Puuid)
+		if statusCode == 200 {
+			for _, id := range matchIds {
+				uniqueMatchIds.Add(id)
+			}
+		} else {
+			fmt.Println(region, summoner)
 		}
 	}
 	matchIds := uniqueMatchIds.ToSlice()
@@ -80,7 +108,11 @@ func main() {
 			return
 		}
 
-		matchData, _ := tft.TftMatchV1MatchesById(matchId)
+		matchData, _, statusCode := tft.TftMatchV1MatchesById(matchId)
+		if statusCode != 200 {
+			continue
+		}
+
 		gq.Query("queries/upsert_match", matchId)
 
 		set := matchData.Info.TftSetNumber
@@ -161,22 +193,16 @@ func TftGo(RiotApiKey string, region string, showLogs bool, rateLimit bool, retr
 		RetryCount: retryCount,
 	}
 
-	// Verify region and get AltRegion
-	regionMap := make(map[string]string)
+	regionMap := make(map[string]string, 0)
 	regionMap["na1"] = "americas"
+	regionMap["kr"] = "asia"
+	regionMap["jp1"] = "asia"
 
-	// NOTE: The altRegion is really just what cluster is being called.
-	// and should likely just be americas always. This is the setup for testing
-	// but should likely be an entirely different argument instead.
-	val, ok := regionMap[region]
-	if !ok {
-		return t, errors.New("TftGo - Invalid region provided")
-	}
-	t.AltRegion = val
+	t.AltRegion = regionMap[region]
 
 	// Validate API key
 	var result interface{}
-	err := t.Request("tft/status/v1/platform-data", false, &result, t.RetryCount)
+	err, _ := t.Request("tft/status/v1/platform-data", false, &result, t.RetryCount)
 	if err != nil {
 		return t, errors.New("TftGo - Invalid API key")
 	}
@@ -184,7 +210,7 @@ func TftGo(RiotApiKey string, region string, showLogs bool, rateLimit bool, retr
 	return t, nil
 }
 
-func (t *TFTGO) Request(url string, isAltRegion bool, target interface{}, retryCount int) error {
+func (t *TFTGO) Request(url string, isAltRegion bool, target interface{}, retryCount int) (error, int) {
 	// proper region mapping
 	u := ""
 	if isAltRegion {
@@ -193,29 +219,27 @@ func (t *TFTGO) Request(url string, isAltRegion bool, target interface{}, retryC
 		u = "https://" + t.Region + ".api.riotgames.com/" + url
 	}
 
-	if t.ShowLogs {
-		log.Printf("TFTGO Request - %v\n", u)
-	}
-
 	client := http.Client{}
 	req, err := http.NewRequest("GET", u, nil)
 	if err != nil {
-		return err
+		return err, 0
 	}
 
 	req.Header = http.Header{
 		"X-Riot-Token": {t.key},
 	}
 
-	// TODO: Do something smarter here
+	// TODO: This really needs to be better. Likely by keeping a global req count and doing some math.
+	// Also on non-test keys should be able to lower it greatly.
 	if t.RateLimit {
-		time.Sleep(25 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	// Only retry on the DO
 	res, err := client.Do(req)
 	if err != nil && retryCount == 0 {
-		return err
+		fmt.Println("request err: ", err)
+		return err, 0
 	} else if err != nil && retryCount > 0 {
 		// NOTE: This is hard coded to 1, but may want to make it variable
 		time.Sleep(1 * time.Second)
@@ -223,21 +247,28 @@ func (t *TFTGO) Request(url string, isAltRegion bool, target interface{}, retryC
 	}
 	defer res.Body.Close()
 
+	if t.ShowLogs {
+		fmt.Println("\n+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+")
+		log.Printf("  ::TFTGO Request::\n%v\n", u)
+		fmt.Println(res.StatusCode)
+		fmt.Println("+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+")
+	}
+
 	if res.StatusCode == 403 {
-		return errors.New("Status Code 403: Foribidden. This likely means the key given is either invalid or does not have access to the selected endpoint.")
+		return errors.New("Status Code 403: Foribidden. This likely means the key given is either invalid or does not have access to the selected endpoint."), 403
 	}
 
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
-		return err
+		return err, 0
 	}
 
 	err = json.Unmarshal(body, &target)
 	if err != nil {
-		return err
+		return err, 0
 	}
 
-	return nil
+	return nil, res.StatusCode
 }
 
 type TftLeagueEntry struct {
@@ -260,37 +291,37 @@ type TftLeagueResponse struct {
 	Entries  []TftLeagueEntry `json:"entries"`
 }
 
-func (t *TFTGO) TftLeagueV1Challenger() (TftLeagueResponse, error) {
+func (t *TFTGO) TftLeagueV1Challenger() (TftLeagueResponse, error, int) {
 	url := "tft/league/v1/challenger?queue=RANKED_TFT"
 	challenger := TftLeagueResponse{}
-	err := t.Request(url, false, &challenger, t.RetryCount)
+	err, statusCode := t.Request(url, false, &challenger, t.RetryCount)
 	if err != nil {
-		return challenger, err
+		return challenger, err, statusCode
 	}
 
-	return challenger, nil
+	return challenger, nil, statusCode
 }
 
-func (t *TFTGO) TftLeagueV1Grandmaster() (TftLeagueResponse, error) {
+func (t *TFTGO) TftLeagueV1Grandmaster() (TftLeagueResponse, error, int) {
 	url := "tft/league/v1/grandmaster?queue=RANKED_TFT"
 	grandmaster := TftLeagueResponse{}
-	err := t.Request(url, false, &grandmaster, t.RetryCount)
+	err, statusCode := t.Request(url, false, &grandmaster, t.RetryCount)
 	if err != nil {
-		return grandmaster, err
+		return grandmaster, err, statusCode
 	}
 
-	return grandmaster, nil
+	return grandmaster, nil, statusCode
 }
 
-func (t *TFTGO) TftLeagueV1Master() (TftLeagueResponse, error) {
+func (t *TFTGO) TftLeagueV1Master() (TftLeagueResponse, error, int) {
 	url := "tft/league/v1/master?queue=RANKED_TFT"
 	master := TftLeagueResponse{}
-	err := t.Request(url, false, &master, t.RetryCount)
+	err, statusCode := t.Request(url, false, &master, t.RetryCount)
 	if err != nil {
-		return master, err
+		return master, err, statusCode
 	}
 
-	return master, nil
+	return master, nil, statusCode
 }
 
 type TftSummonerResponse struct {
@@ -302,26 +333,27 @@ type TftSummonerResponse struct {
 	SummonerLevel int    `json:"summonerLevel"`
 }
 
-func (t *TFTGO) TftSummonerV1SummonerId(summonerId string) (TftSummonerResponse, error) {
+func (t *TFTGO) TftSummonerV1SummonerId(summonerId string) (TftSummonerResponse, error, int) {
 	url := "tft/summoner/v1/summoners/" + summonerId
 	summoner := TftSummonerResponse{}
-	err := t.Request(url, false, &summoner, t.RetryCount)
+	err, statusCode := t.Request(url, false, &summoner, t.RetryCount)
 	if err != nil {
-		return summoner, err
+		return summoner, err, statusCode
 	}
 
-	return summoner, err
+	return summoner, err, statusCode
 }
 
-func (t *TFTGO) TftMatchV1MatchesByPuuid(puuid string) ([]string, error) {
-	url := "tft/match/v1/matches/by-puuid/" + puuid + "/ids?start=0&count=200"
+func (t *TFTGO) TftMatchV1MatchesByPuuid(puuid string) ([]string, error, int) {
+	// NOTE: Update startTime per set
+	url := "tft/match/v1/matches/by-puuid/" + puuid + "/ids?start=0&startTime=1722474000&count=1000"
 	ids := make([]string, 0)
-	err := t.Request(url, true, &ids, t.RetryCount)
+	err, statusCode := t.Request(url, true, &ids, t.RetryCount)
 	if err != nil {
-		return ids, err
+		return ids, err, statusCode
 	}
 
-	return ids, nil
+	return ids, nil, statusCode
 }
 
 // NOTE: This is not parsing all the data, and I may be able to cut some more out
@@ -373,15 +405,15 @@ type TftMatchResponse struct {
 	Info     TftMatchDataInfo `json:"info"`
 }
 
-func (t *TFTGO) TftMatchV1MatchesById(matchId string) (TftMatchResponse, error) {
+func (t *TFTGO) TftMatchV1MatchesById(matchId string) (TftMatchResponse, error, int) {
 	url := "tft/match/v1/matches/" + matchId
 	matchData := TftMatchResponse{}
-	err := t.Request(url, true, &matchData, t.RetryCount)
+	err, statusCode := t.Request(url, true, &matchData, t.RetryCount)
 	if err != nil {
-		return matchData, err
+		return matchData, err, statusCode
 	}
 
-	return matchData, err
+	return matchData, nil, statusCode
 }
 
 func (t *TFTGO) parsePatchNumber(gameVersion string) string {
