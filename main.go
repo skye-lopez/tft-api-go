@@ -1,3 +1,5 @@
+// TODO: Can break this into multiple files/packages
+// TODO: Backup pg data
 package main
 
 import (
@@ -30,8 +32,6 @@ func handleError(e error, context string) {
 }
 
 func main() {
-	var wg sync.WaitGroup
-
 	err := godotenv.Load(".env")
 	handleError(err, "Error loading .env file.")
 
@@ -39,19 +39,21 @@ func main() {
 	handleError(err, "Error connecting to DB")
 	gq.AddQueriesToMap("queries")
 
-	wg.Add(1)
-	go AnalyzeRegion("na1", &gq, &wg)
+	var wg sync.WaitGroup
 
 	wg.Add(1)
-	go AnalyzeRegion("jp1", &gq, &wg)
+	go CollectRegion("na1", &gq, &wg)
 
 	wg.Add(1)
-	go AnalyzeRegion("kr", &gq, &wg)
+	go CollectRegion("jp1", &gq, &wg)
+
+	wg.Add(1)
+	go CollectRegion("kr", &gq, &wg)
 
 	wg.Wait()
 }
 
-func AnalyzeRegion(region string, gq *goquery.GoQuery, wg *sync.WaitGroup) {
+func CollectRegion(region string, gq *goquery.GoQuery, wg *sync.WaitGroup) {
 	defer wg.Done()
 	riotKey := os.Getenv("RIOT_KEY")
 
@@ -105,7 +107,7 @@ func AnalyzeRegion(region string, gq *goquery.GoQuery, wg *sync.WaitGroup) {
 		handleError(err, "queries/get_match err:")
 		if rows[0].([]interface{})[0] != "none" {
 			fmt.Println("Skipping match")
-			return
+			continue
 		}
 
 		matchData, _, statusCode := tft.TftMatchV1MatchesById(matchId)
@@ -210,6 +212,7 @@ func TftGo(RiotApiKey string, region string, showLogs bool, rateLimit bool, retr
 	return t, nil
 }
 
+// NOTE: Rate limits should apply by region, idk if that means na1,euw1,kr... or asia,americas,europe groups.
 func (t *TFTGO) Request(url string, isAltRegion bool, target interface{}, retryCount int) (error, int) {
 	// proper region mapping
 	u := ""

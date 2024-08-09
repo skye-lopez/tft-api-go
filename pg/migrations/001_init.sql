@@ -37,3 +37,9 @@ create table augments (
 create table matches (
     id text primary key
 );
+
+create table history (
+    uuid uuid primary key default gen_random_uuid(),
+    created_at timestamp not null default now(),
+    data JSONB not null
+);
