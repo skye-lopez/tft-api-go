@@ -21,12 +21,13 @@ $$ language plpgsql;
 create or replace function get_team_data(
     fetch_count integer,
     search_patch text
-) returns json[] as $$
+) returns json as $$
 declare
 t record;
 obj json;
 team_data json[];
 augment_data json[];
+all_data json;
 counter integer;
 idx integer;
 sum_of_places integer;
@@ -49,9 +50,31 @@ begin
             'top2', ((t.places[1] + t.places[2])::numeric / t.sample::numeric) * 100,
             'top1', (t.places[1]::numeric / t.sample::numeric) * 100
         );
-        team_data = team_data || array_append('{}'::json[], obj);
+        team_data = team_data || obj;
     end loop;
 
-    return team_data;
+    augment_data := '{}'::json[];
+    for t in select id, name, places, (select sum(s) from unnest(places) s) as sample from augments where split_part(id, '~', 3) = search_patch loop
+        avg := get_avg_placement(t.places::integer[], t.sample::int);
+        
+        obj := json_build_object(
+            'id', t.id,
+            'places', t.places,
+            'sample', t.sample,
+            'avg', avg,
+            'top4', ((t.places[1] + t.places[2] + t.places[3] + t.places[4])::numeric / t.sample::numeric) * 100,
+            'top3', ((t.places[1] + t.places[2] + t.places[3])::numeric / t.sample::numeric) * 100,
+            'top2', ((t.places[1] + t.places[2])::numeric / t.sample::numeric) * 100,
+            'top1', (t.places[1]::numeric / t.sample::numeric) * 100
+        );
+        augment_data = augment_data || obj;
+    end loop;
+
+    all_data := json_build_object(
+        'teams', team_data,
+        'augments', augment_data
+    );
+
+    return all_data;
 end
 $$ language plpgsql;
