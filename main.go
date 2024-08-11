@@ -1,5 +1,8 @@
-// TODO: Can break this into multiple files/packages
-// TODO: Backup pg data
+// TODO::
+// 1) DB backups
+// 2) CRON script
+// 3) Error handling
+// 4) Testing
 package main
 
 import (
@@ -23,7 +26,6 @@ import (
 	goquery "github.com/skye-lopez/go-query"
 )
 
-// TODO: Better errors.
 func handleError(e error, context string) {
 	if e != nil {
 		fmt.Println(context)
@@ -51,6 +53,8 @@ func main() {
 	go CollectRegion("kr", &gq, &wg)
 
 	wg.Wait()
+
+	os.Exit(0)
 }
 
 func CollectRegion(region string, gq *goquery.GoQuery, wg *sync.WaitGroup) {
@@ -115,10 +119,10 @@ func CollectRegion(region string, gq *goquery.GoQuery, wg *sync.WaitGroup) {
 			continue
 		}
 
-		gq.Query("queries/upsert_match", matchId)
-
 		set := matchData.Info.TftSetNumber
 		patch := tft.parsePatchNumber(matchData.Info.GameVersion)
+
+		gq.Query("queries/upsert_match", matchId, set, patch)
 
 		for _, p := range matchData.Info.Participants {
 			unitKeys := make([]string, 0)

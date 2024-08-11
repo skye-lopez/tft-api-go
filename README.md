@@ -1,6 +1,11 @@
 # tftgo
 Simple data analysis of top level play in golang
 
+# need:
+- aws cli
+- psql 
+- go 
+
 # Manual usage:
 for testing
 

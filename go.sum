@@ -4,7 +4,5 @@ github.com/joho/godotenv v1.5.1 h1:7eLL/+HRGLY0ldzfGMeQkb7vMd0as4CfYvUVzLqw0N0=
 github.com/joho/godotenv v1.5.1/go.mod h1:f4LDr5Voq0i2e/R5DDNOoa2zzDfwtkZa6DnEwAbqwq4=
 github.com/lib/pq v1.10.9 h1:YXG7RB+JIjhP29X+OtkiDnYaXQwpS4JEWq7dtCCRUEw=
 github.com/lib/pq v1.10.9/go.mod h1:AlVN5x4E4T544tWzH6hKfbfQvm3HdbOxrmggDNAPY9o=
-github.com/skye-lopez/go-pq-migrator v1.0.0 h1:X3Z3sVrxgl7L1DMIHdCT4YOLttFXeBH54qgeV6UOKVo=
-github.com/skye-lopez/go-pq-migrator v1.0.0/go.mod h1:zEioF+7BwfgduuK/TWOg0yTn1XYio4IihAcexFbqgH0=
 github.com/skye-lopez/go-query v0.0.3 h1:TRXbKVJf8vquR3CrMnE3rpBMeeo8VpplyoC3h+jXK94=
 github.com/skye-lopez/go-query v0.0.3/go.mod h1:ceXuw6+I+rAKybI3k3YXQdEpOJmBEA1ADoBuhU2nURY=

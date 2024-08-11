@@ -1,1 +1,1 @@
-INSERT INTO matches (id) VALUES ($1) ON CONFLICT DO NOTHING;
+INSERT INTO matches (id, set, patch) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING;

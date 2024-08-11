@@ -35,7 +35,9 @@ create table augments (
 );
 
 create table matches (
-    id text primary key
+    id text primary key,
+    set text not null,
+    patch text not null
 );
 
 create table history (

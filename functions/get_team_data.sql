@@ -107,11 +107,17 @@ begin
         unit_data  = unit_data || obj;
     end loop;
 
+    select count(*) as sample from matches into t;
+
     all_data := json_build_object(
         'teams', team_data,
         'augments', augment_data,
-        'units', unit_data
+        'units', unit_data,
+        'sample', t.sample
     );
+
+    -- create backup
+    insert into history (data, patch) values (all_data, search_patch);
 
     return all_data;
 end
