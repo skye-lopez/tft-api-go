@@ -76,6 +76,9 @@ func CollectRegion(region string, gq *goquery.GoQuery, wg *sync.WaitGroup) {
 	masterEntries, _, _ := tft.TftLeagueV1Master()
 	entries = append(entries, masterEntries.Entries...)
 
+	tft.RequestsToDo = len(entries)
+	tft.RequestsDone = 0
+
 	// get summoners from entries --------------------------------------------
 	summoners := make([]TftSummonerResponse, 0)
 	for _, entry := range entries {
@@ -103,14 +106,15 @@ func CollectRegion(region string, gq *goquery.GoQuery, wg *sync.WaitGroup) {
 		}
 	}
 	matchIds := uniqueMatchIds.ToSlice()
-	fmt.Println("Processing matches: ", len(matchIds))
+	tft.RequestsToDo = len(matchIds)
+	tft.RequestsDone = 0
 
 	// Process each match ----------------------------------------------------
 	for _, matchId := range matchIds {
 		rows, err := gq.Query("queries/get_match", matchId)
 		handleError(err, "queries/get_match err:")
 		if rows[0].([]interface{})[0] != "none" {
-			fmt.Println("Skipping match")
+			tft.RequestsDone += 1
 			continue
 		}
 
@@ -182,21 +186,25 @@ func Connect() (goquery.GoQuery, error) {
 }
 
 type TFTGO struct {
-	key        string
-	Region     string
-	AltRegion  string
-	ShowLogs   bool
-	RateLimit  bool
-	RetryCount int
+	key          string
+	Region       string
+	AltRegion    string
+	ShowLogs     bool
+	RateLimit    bool
+	RetryCount   int
+	RequestsToDo int
+	RequestsDone int
 }
 
 func TftGo(RiotApiKey string, region string, showLogs bool, rateLimit bool, retryCount int) (TFTGO, error) {
 	t := TFTGO{
-		key:        RiotApiKey,
-		Region:     region,
-		ShowLogs:   showLogs,
-		RateLimit:  rateLimit,
-		RetryCount: retryCount,
+		key:          RiotApiKey,
+		Region:       region,
+		ShowLogs:     showLogs,
+		RateLimit:    rateLimit,
+		RetryCount:   retryCount,
+		RequestsToDo: 0,
+		RequestsDone: 0,
 	}
 
 	regionMap := make(map[string]string, 0)
@@ -239,7 +247,7 @@ func (t *TFTGO) Request(url string, isAltRegion bool, target interface{}, retryC
 	// TODO: This really needs to be better. Likely by keeping a global req count and doing some math.
 	// Also on non-test keys should be able to lower it greatly.
 	if t.RateLimit {
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	// Only retry on the DO
@@ -253,12 +261,12 @@ func (t *TFTGO) Request(url string, isAltRegion bool, target interface{}, retryC
 		return t.Request(url, isAltRegion, target, (retryCount - 1))
 	}
 	defer res.Body.Close()
+	t.RequestsDone += 1
 
 	if t.ShowLogs {
 		fmt.Println("\n+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+")
-		log.Printf("  ::TFTGO Request::\n%v\n", u)
-		fmt.Println(res.StatusCode)
-		fmt.Println("+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+~+")
+		log.Printf(" ::TFTGO Request:: %v\n%v\n", res.StatusCode, u)
+		fmt.Println("Region: ", t.Region, " -- [", t.RequestsDone, "/", t.RequestsToDo, "]")
 	}
 
 	if res.StatusCode == 403 {

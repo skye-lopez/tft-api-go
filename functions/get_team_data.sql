@@ -76,7 +76,7 @@ begin
     unit_data := '{}'::json[];
     for t in select id, name, places, (select sum(s) from unnest(places) s) as sample from units where split_part(id, '~', 3) = search_patch loop
         unit_item_data := '{}'::json[];
-        for a in select id, places, (select sum(s) from unnest(places) s) as sample from unit_item where units_id = t.id order by sample desc limit 50 loop
+        for a in select id, places, (select sum(s) from unnest(places) s) as sample from unit_item where units_id = t.id and id not like '%ThiefsGloves%' order by sample desc limit 50 loop
             avg := get_avg_placement(a.places::integer[], a.sample::int);
             obj := json_build_object(
                 'id', a.id,

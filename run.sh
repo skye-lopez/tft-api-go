@@ -1,7 +1,8 @@
 #!/usr/bin/bash
 source ./config.txt
 
-# go run main.go
+# generate new data
+go run main.go
 
 # move any old report and timestamp it
 timestamp=$(date +%Y-%m-%d_%H-%M-%S)
