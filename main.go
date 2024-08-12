@@ -142,6 +142,7 @@ func CollectRegion(region string, gq *goquery.GoQuery, wg *sync.WaitGroup) {
 				// For now we only want to track units that completed the match
 				// with 3 items
 				if len(u.ItemNames) == 3 {
+					slices.Sort(u.ItemNames)
 					itemId := fmt.Sprintf("%s~%s~%s~%s", unitKey, u.ItemNames[0], u.ItemNames[1], u.ItemNames[2])
 					gq.Query("queries/upsert_unit_item", itemId, unitKey, p.Placement)
 				}
