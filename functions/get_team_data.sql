@@ -107,7 +107,7 @@ begin
         unit_data  = unit_data || obj;
     end loop;
 
-    select count(*) as sample from matches into t;
+    select count(*) as sample from matches where patch = search_patch into t;
 
     all_data := json_build_object(
         'teams', team_data,

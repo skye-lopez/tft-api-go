@@ -52,6 +52,30 @@ func main() {
 	wg.Add(1)
 	go CollectRegion("kr", &gq, &wg)
 
+	wg.Add(1)
+	go CollectRegion("euw1", &gq, &wg)
+
+	wg.Add(1)
+	go CollectRegion("eun1", &gq, &wg)
+
+	wg.Add(1)
+	go CollectRegion("oc1", &gq, &wg)
+
+	wg.Add(1)
+	go CollectRegion("br1", &gq, &wg)
+
+	wg.Add(1)
+	go CollectRegion("la1", &gq, &wg)
+
+	wg.Add(1)
+	go CollectRegion("la2", &gq, &wg)
+
+	wg.Add(1)
+	go CollectRegion("ru", &gq, &wg)
+
+	wg.Add(1)
+	go CollectRegion("tr1", &gq, &wg)
+
 	wg.Wait()
 
 	os.Exit(0)
@@ -210,8 +234,16 @@ func TftGo(RiotApiKey string, region string, showLogs bool, rateLimit bool, retr
 
 	regionMap := make(map[string]string, 0)
 	regionMap["na1"] = "americas"
+	regionMap["br1"] = "americas"
+	regionMap["la1"] = "americas"
+	regionMap["la2"] = "americas"
 	regionMap["kr"] = "asia"
 	regionMap["jp1"] = "asia"
+	regionMap["oc1"] = "asia"
+	regionMap["eun1"] = "europe"
+	regionMap["euw1"] = "europe"
+	regionMap["ru"] = "europe"
+	regionMap["tr1"] = "europe"
 
 	t.AltRegion = regionMap[region]
 
@@ -362,7 +394,7 @@ func (t *TFTGO) TftSummonerV1SummonerId(summonerId string) (TftSummonerResponse,
 
 func (t *TFTGO) TftMatchV1MatchesByPuuid(puuid string) ([]string, error, int) {
 	// NOTE: Update startTime per set
-	url := "tft/match/v1/matches/by-puuid/" + puuid + "/ids?start=0&startTime=1722474000&count=1000"
+	url := "tft/match/v1/matches/by-puuid/" + puuid + "/ids?start=0&startTime=1723662000&count=1000"
 	ids := make([]string, 0)
 	err, statusCode := t.Request(url, true, &ids, t.RetryCount)
 	if err != nil {
